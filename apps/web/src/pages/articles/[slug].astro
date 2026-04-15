@@ -1,0 +1,23 @@
+---
+import Base from '@/layouts/Base.astro';
+import { strapiGet } from '@/lib/strapi';
+
+export const prerender = false;
+
+const { slug } = Astro.params;
+interface StrapiList<T> { data: Array<{ id: number; attributes: T }>; }
+interface Article { title: string; slug: string; excerpt?: string; content?: string; }
+
+const res = await strapiGet<StrapiList<Article>>('/articles', {
+  filters: { slug: { $eq: slug } },
+  pagination: { pageSize: 1 },
+});
+const article = res.data[0]?.attributes;
+if (!article) return new Response('Not found', { status: 404 });
+---
+<Base title={article.title} description={article.excerpt}>
+  <article>
+    <h1>{article.title}</h1>
+    {article.content && <div set:html={article.content} />}
+  </article>
+</Base>

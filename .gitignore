@@ -1,0 +1,43 @@
+# Env files
+.env
+.env.local
+.env.staging
+.env.production
+!.env.example
+
+# Node
+node_modules/
+dist/
+.astro/
+build/
+
+# Strapi
+apps/cms/.tmp/
+apps/cms/.cache/
+apps/cms/build/
+apps/cms/public/uploads/*
+!apps/cms/public/uploads/.gitkeep
+
+# Docker
+infra/docker/data/
+infra/nginx/certs/*
+!infra/nginx/certs/.gitkeep
+
+# Secrets
+*.key
+*.pem
+!infra/nginx/certs/*.example
+infra/cloudflare/.cf-token
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/

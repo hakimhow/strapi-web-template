@@ -1,0 +1,39 @@
+# 开发叠加层：bind-mount 源码 + 热重载 + 直接暴露端口（不走 nginx）
+services:
+  postgres:
+    ports:
+      - "${DB_PORT}:5432"
+
+  cms:
+    image: node:20-alpine
+    working_dir: /opt/app
+    command: sh -c "npm install && npm run develop"
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ../../apps/cms:/opt/app
+      - cms-node-modules:/opt/app/node_modules
+    ports:
+      - "${CMS_PORT}:1337"
+
+  imagor:
+    environment:
+      IMAGOR_UNSAFE: 1
+    ports:
+      - "${IMAGOR_PORT}:8000"
+
+  web:
+    image: node:20-alpine
+    working_dir: /opt/app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ../../apps/web:/opt/app
+      - web-node-modules:/opt/app/node_modules
+    ports:
+      - "${WEB_PORT}:3000"
+
+volumes:
+  cms-node-modules:
+  web-node-modules:

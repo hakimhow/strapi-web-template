@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod +x \"C:/Users/houyu/strapi+astro-templates/scripts/\"*.sh \"C:/Users/houyu/strapi+astro-templates/infra/cloudflare/\"*.sh)"
+    ]
+  }
+}

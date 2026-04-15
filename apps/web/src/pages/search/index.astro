@@ -1,0 +1,27 @@
+---
+import Base from '@/layouts/Base.astro';
+const q = Astro.url.searchParams.get('q') ?? '';
+---
+<Base title={q ? `搜索：${q}` : '搜索'}>
+  <h1>搜索</h1>
+  <form method="get" action="/search">
+    <input type="search" name="q" value={q} placeholder="输入关键词..." autofocus />
+    <button type="submit">搜索</button>
+  </form>
+  <div id="results">
+    {q && <p>正在搜索 <strong>{q}</strong> ...</p>}
+  </div>
+  <script define:vars={{ q }}>
+    if (q) {
+      fetch(`/api/search?q=${encodeURIComponent(q)}`)
+        .then((r) => r.json())
+        .then((data) => {
+          const el = document.getElementById('results');
+          if (!data.results?.length) { el.innerHTML = '<p>无结果</p>'; return; }
+          el.innerHTML = '<ul>' + data.results.map(
+            (r) => `<li><a href="/articles/${r.slug}">${r.title}</a><p>${r.excerpt ?? ''}</p></li>`
+          ).join('') + '</ul>';
+        });
+    }
+  </script>
+</Base>

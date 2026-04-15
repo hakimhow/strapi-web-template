@@ -1,0 +1,20 @@
+{
+  "name": "cms",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "develop": "strapi develop",
+    "start": "strapi start",
+    "build": "strapi build",
+    "strapi": "strapi"
+  },
+  "dependencies": {
+    "@strapi/strapi": "^4.25.0",
+    "@strapi/plugin-users-permissions": "^4.25.0",
+    "@strapi/plugin-i18n": "^4.25.0",
+    "pg": "^8.12.0"
+  },
+  "engines": {
+    "node": ">=18 <=20"
+  }
+}

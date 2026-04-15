@@ -1,0 +1,86 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ${SITE_SLUG}-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+  cms:
+    image: ${GHCR_IMAGE_CMS}:${IMAGE_TAG:-latest}
+    container_name: ${SITE_SLUG}-cms
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_CLIENT: postgres
+      DATABASE_HOST: ${DB_HOST}
+      DATABASE_PORT: ${DB_PORT}
+      DATABASE_NAME: ${DB_NAME}
+      DATABASE_USERNAME: ${DB_USER}
+      DATABASE_PASSWORD: ${DB_PASSWORD}
+      DATABASE_SSL: ${DB_SSL}
+      APP_KEYS: ${STRAPI_APP_KEYS}
+      API_TOKEN_SALT: ${STRAPI_API_TOKEN_SALT}
+      ADMIN_JWT_SECRET: ${STRAPI_ADMIN_JWT_SECRET}
+      JWT_SECRET: ${STRAPI_JWT_SECRET}
+      TRANSFER_TOKEN_SALT: ${STRAPI_TRANSFER_TOKEN_SALT}
+      HOST: 0.0.0.0
+      PORT: 1337
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - cms-uploads:/opt/app/public/uploads
+    networks: [internal]
+
+  imagor:
+    image: shumc/imagor:latest
+    container_name: ${SITE_SLUG}-imagor
+    restart: unless-stopped
+    environment:
+      PORT: 8000
+      IMAGOR_SECRET: ${IMAGOR_SECRET}
+      IMAGOR_UNSAFE: ${IMAGOR_UNSAFE:-0}
+      FILE_LOADER_BASE_DIR: /mnt/uploads
+      FILE_STORAGE_BASE_DIR: /mnt/cache
+    volumes:
+      - cms-uploads:/mnt/uploads:ro
+      - imagor-cache:/mnt/cache
+    networks: [internal]
+
+  web:
+    image: ${GHCR_IMAGE_WEB}:${IMAGE_TAG:-latest}
+    container_name: ${SITE_SLUG}-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      HOST: 0.0.0.0
+      PORT: 3000
+      PUBLIC_SITE_URL: ${PUBLIC_SITE_URL}
+      PUBLIC_STRAPI_URL: ${PUBLIC_STRAPI_URL}
+      PUBLIC_IMAGOR_URL: ${PUBLIC_IMAGOR_URL}
+      INTERNAL_STRAPI_URL: ${INTERNAL_STRAPI_URL}
+      INTERNAL_IMAGOR_URL: ${INTERNAL_IMAGOR_URL}
+      STRAPI_PUBLIC_TOKEN: ${STRAPI_PUBLIC_TOKEN}
+    depends_on:
+      - cms
+    networks: [internal]
+
+volumes:
+  pg-data:
+  cms-uploads:
+  imagor-cache:
+
+networks:
+  internal:
+    name: ${SITE_SLUG}-net

@@ -1,0 +1,44 @@
+name: Deploy to production
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag to deploy'
+        required: true
+        default: 'latest'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write secrets to env
+        env:
+          ENV_PROD: ${{ secrets.ENV_PRODUCTION }}
+          CF_CRED:  ${{ secrets.CF_CREDENTIALS_INI }}
+        run: |
+          echo "$ENV_PROD" > .env.production
+          echo "$CF_CRED"  > infra/cloudflare/cf-credentials.ini
+          chmod 600 .env.production infra/cloudflare/cf-credentials.ini
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # deploy.sh 会读取 .env.production 里的 DEPLOY_SSH_KEY；这里覆盖成 CI 路径
+          sed -i "s|^DEPLOY_SSH_KEY=.*|DEPLOY_SSH_KEY=$HOME/.ssh/id_ed25519|" .env.production
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deploy
+        run: bash scripts/deploy.sh production ${{ inputs.tag }}
