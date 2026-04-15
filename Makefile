@@ -26,12 +26,12 @@ logs:         ## 跟踪日志
 ps:
 	@$(COMPOSE) ps
 
-build:        ## 本地构建镜像
-	@docker build -t $${GHCR_IMAGE_WEB:-web}:local apps/web
+build:        ## 本地构建 cms 镜像 + web 静态产物
 	@docker build -t $${GHCR_IMAGE_CMS:-cms}:local apps/cms
+	@cd apps/web && npm ci && npm run build
 
-push:         ## 构建并推送到 GHCR（tag=git sha）
-	@bash scripts/deploy.sh staging    # 用 staging 默认只构建，可调整
+web-build:    ## 只构建前端静态产物
+	@cd apps/web && npm ci && npm run build
 
 shell-web:
 	@$(COMPOSE) exec web sh

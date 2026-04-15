@@ -5,6 +5,7 @@ import { strapiGet } from '@/lib/strapi';
 interface StrapiList<T> { data: Array<{ id: number; attributes: T }>; }
 interface Article { title: string; slug: string; excerpt?: string; }
 
+// SSG：build 时拉最新 N 篇
 let articles: Array<{ id: number; attributes: Article }> = [];
 try {
   const res = await strapiGet<StrapiList<Article>>('/articles', {
@@ -13,15 +14,15 @@ try {
   });
   articles = res.data;
 } catch (e) {
-  console.warn('Strapi not ready:', e);
+  console.warn('build-time fetch failed:', e);
 }
 ---
 <Base title="首页">
   <h1>最新文章</h1>
   <ul>
     {articles.map((a) => (
-      <li><a href={`/articles/${a.attributes.slug}`}>{a.attributes.title}</a></li>
+      <li><a href={`/articles/${a.attributes.slug}/`}>{a.attributes.title}</a></li>
     ))}
   </ul>
-  {articles.length === 0 && <p>还没有内容 —— 请到 <a href={import.meta.env.PUBLIC_STRAPI_URL + '/admin'}>Strapi 后台</a> 创建。</p>}
+  {articles.length === 0 && <p>构建时未获取到内容 —— 请检查 Strapi 是否可达，并确认已发布文章。</p>}
 </Base>

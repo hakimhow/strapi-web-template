@@ -2,18 +2,26 @@
 import Base from '@/layouts/Base.astro';
 import { strapiGet } from '@/lib/strapi';
 
-export const prerender = false;
-
-const { slug } = Astro.params;
 interface StrapiList<T> { data: Array<{ id: number; attributes: T }>; }
 interface Article { title: string; slug: string; excerpt?: string; content?: string; }
 
-const res = await strapiGet<StrapiList<Article>>('/articles', {
-  filters: { slug: { $eq: slug } },
-  pagination: { pageSize: 1 },
-});
-const article = res.data[0]?.attributes;
-if (!article) return new Response('Not found', { status: 404 });
+// SSG：构建时枚举全部文章
+export async function getStaticPaths() {
+  try {
+    const res = await strapiGet<StrapiList<Article>>('/articles', {
+      pagination: { pageSize: 1000 },
+    });
+    return res.data.map((d) => ({
+      params: { slug: d.attributes.slug },
+      props: { article: d.attributes },
+    }));
+  } catch (e) {
+    console.warn('getStaticPaths: Strapi unreachable, no articles pre-rendered', e);
+    return [];
+  }
+}
+
+const { article } = Astro.props as { article: Article };
 ---
 <Base title={article.title} description={article.excerpt}>
   <article>

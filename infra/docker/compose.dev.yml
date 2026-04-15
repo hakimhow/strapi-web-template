@@ -1,4 +1,4 @@
-# 开发叠加层：bind-mount 源码 + 热重载 + 直接暴露端口（不走 nginx）
+# 开发：Astro dev server 热重载；其余服务直接暴露端口
 services:
   postgres:
     ports:
@@ -22,17 +22,25 @@ services:
     ports:
       - "${IMAGOR_PORT}:8000"
 
-  web:
+  # SSG 模式下，开发仍然用 Astro dev server（它本身是 SSR 行为但不打包）
+  web-dev:
     image: node:20-alpine
+    container_name: ${SITE_SLUG}-web-dev
     working_dir: /opt/app
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
     environment:
       NODE_ENV: development
+      PUBLIC_SITE_URL: ${PUBLIC_SITE_URL}
+      PUBLIC_STRAPI_URL: ${PUBLIC_STRAPI_URL}
+      PUBLIC_IMAGOR_URL: ${PUBLIC_IMAGOR_URL}
+      INTERNAL_STRAPI_URL: ${INTERNAL_STRAPI_URL}
+      STRAPI_PUBLIC_TOKEN: ${STRAPI_PUBLIC_TOKEN}
     volumes:
       - ../../apps/web:/opt/app
       - web-node-modules:/opt/app/node_modules
     ports:
-      - "${WEB_PORT}:3000"
+      - "${WEB_PORT}:4321"
+    networks: [internal]
 
 volumes:
   cms-node-modules:

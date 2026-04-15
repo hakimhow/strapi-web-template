@@ -1,3 +1,4 @@
+# SSG 模式：没有 web 容器。nginx 直接服务构建好的静态文件（通过 /srv/<site>/dist 卷挂入）。
 services:
   postgres:
     image: postgres:16-alpine
@@ -34,6 +35,7 @@ services:
       ADMIN_JWT_SECRET: ${STRAPI_ADMIN_JWT_SECRET}
       JWT_SECRET: ${STRAPI_JWT_SECRET}
       TRANSFER_TOKEN_SALT: ${STRAPI_TRANSFER_TOKEN_SALT}
+      PUBLIC_SITE_URL: ${PUBLIC_SITE_URL}
       HOST: 0.0.0.0
       PORT: 1337
     depends_on:
@@ -56,24 +58,6 @@ services:
     volumes:
       - cms-uploads:/mnt/uploads:ro
       - imagor-cache:/mnt/cache
-    networks: [internal]
-
-  web:
-    image: ${GHCR_IMAGE_WEB}:${IMAGE_TAG:-latest}
-    container_name: ${SITE_SLUG}-web
-    restart: unless-stopped
-    environment:
-      NODE_ENV: ${NODE_ENV:-production}
-      HOST: 0.0.0.0
-      PORT: 3000
-      PUBLIC_SITE_URL: ${PUBLIC_SITE_URL}
-      PUBLIC_STRAPI_URL: ${PUBLIC_STRAPI_URL}
-      PUBLIC_IMAGOR_URL: ${PUBLIC_IMAGOR_URL}
-      INTERNAL_STRAPI_URL: ${INTERNAL_STRAPI_URL}
-      INTERNAL_IMAGOR_URL: ${INTERNAL_IMAGOR_URL}
-      STRAPI_PUBLIC_TOKEN: ${STRAPI_PUBLIC_TOKEN}
-    depends_on:
-      - cms
     networks: [internal]
 
 volumes:

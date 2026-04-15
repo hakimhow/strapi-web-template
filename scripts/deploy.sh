@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# 部署到 staging（本地服务器）或 production（远程 VPS）。
-# 流程：
-#   1. 构建 web / cms 镜像并推送到 GHCR
-#   2. rsync compose 文件 + nginx 配置 + cloudflare 凭证 到目标服务器
-#   3. 目标机上 docker compose pull && up -d
-#   4. 生产：首次会触发 certbot 签证书；DNS 记录自动切换 proxy=on
-#   5. 健康检查 + 失败回滚
+# SSG 部署：
+#   1. 构建并推送 cms 镜像到 GHCR
+#   2. 本地构建 web 静态产物 dist/（fetch 远程 Strapi 数据）
+#   3. rsync dist/ + compose + nginx + env 到目标机
+#   4. 目标机 docker compose up -d；web 由 nginx 服务 dist/
+#   5. 生产：首次签发证书、健康检查、切 CF proxy=on
 #
 # 用法：
 #   ./deploy.sh staging
@@ -28,47 +27,67 @@ esac
 # shellcheck disable=SC1090
 set -a; source "$ENV_FILE"; set +a
 
-echo "== [1/5] 构建并推送镜像（tag=$TAG）=="
-: "${GHCR_USER:?}" "${GHCR_IMAGE_WEB:?}" "${GHCR_IMAGE_CMS:?}"
-
-# 需要先 `echo $GITHUB_TOKEN | docker login ghcr.io -u $GHCR_USER --password-stdin`
-docker buildx build --platform linux/amd64 \
-  -t "$GHCR_IMAGE_WEB:$TAG" -t "$GHCR_IMAGE_WEB:latest" \
-  --push apps/web
-
+echo "== [1/6] 构建并推送 CMS 镜像（tag=$TAG）=="
+: "${GHCR_USER:?}" "${GHCR_IMAGE_CMS:?}"
 docker buildx build --platform linux/amd64 \
   -t "$GHCR_IMAGE_CMS:$TAG" -t "$GHCR_IMAGE_CMS:latest" \
   --push apps/cms
 
-echo "== [2/5] 同步配置到 $TARGET（$DEPLOY_HOST）=="
+echo "== [2/6] 本地构建前端静态产物 =="
+# 为了在 build 时拉到数据，需要 Strapi 对构建机可达。两种模式：
+#   a) Strapi 已在目标机部署且公开（常见）→ 直接 fetch $PUBLIC_STRAPI_URL
+#   b) 首次部署 CMS 尚未就绪 → 先部署 cms，再 build 前端
+#
+# 这里默认 a)：首次请先跑 ./deploy.sh <target> --cms-only（见下文 TODO）
+pushd apps/web >/dev/null
+npm ci --silent
+PUBLIC_SITE_URL="$PUBLIC_SITE_URL" \
+PUBLIC_STRAPI_URL="$PUBLIC_STRAPI_URL" \
+PUBLIC_IMAGOR_URL="$PUBLIC_IMAGOR_URL" \
+INTERNAL_STRAPI_URL="$PUBLIC_STRAPI_URL" \
+STRAPI_PUBLIC_TOKEN="$STRAPI_PUBLIC_TOKEN" \
+  npm run build
+popd >/dev/null
+[[ -d apps/web/dist ]] || { echo "构建失败：apps/web/dist 不存在"; exit 1; }
+
+echo "== [3/6] 同步到 $TARGET（$DEPLOY_HOST）=="
 SSH_OPTS=(-i "$DEPLOY_SSH_KEY" -o StrictHostKeyChecking=accept-new)
 REMOTE="$DEPLOY_USER@$DEPLOY_HOST"
 RSYNC_OPTS=(-az --delete -e "ssh ${SSH_OPTS[*]}")
 
-ssh "${SSH_OPTS[@]}" "$REMOTE" "mkdir -p $DEPLOY_PATH/infra/nginx/conf.d $DEPLOY_PATH/infra/nginx/certs $DEPLOY_PATH/infra/cloudflare $DEPLOY_PATH/infra/docker"
-rsync "${RSYNC_OPTS[@]}" infra/docker/compose.base.yml       "$REMOTE:$DEPLOY_PATH/infra/docker/"
-rsync "${RSYNC_OPTS[@]}" "infra/docker/$COMPOSE_OVERLAY"      "$REMOTE:$DEPLOY_PATH/infra/docker/"
-rsync "${RSYNC_OPTS[@]}" infra/nginx/conf.d/                  "$REMOTE:$DEPLOY_PATH/infra/nginx/conf.d/"
+ssh "${SSH_OPTS[@]}" "$REMOTE" "mkdir -p $DEPLOY_PATH/infra/nginx/conf.d $DEPLOY_PATH/infra/nginx/certs $DEPLOY_PATH/infra/cloudflare $DEPLOY_PATH/infra/docker $DEPLOY_PATH/dist.new"
+rsync "${RSYNC_OPTS[@]}" apps/web/dist/                       "$REMOTE:$DEPLOY_PATH/dist.new/"
+rsync "${RSYNC_OPTS[@]}" infra/docker/compose.base.yml        "$REMOTE:$DEPLOY_PATH/infra/docker/"
+rsync "${RSYNC_OPTS[@]}" "infra/docker/$COMPOSE_OVERLAY"       "$REMOTE:$DEPLOY_PATH/infra/docker/"
+rsync "${RSYNC_OPTS[@]}" infra/nginx/conf.d/                   "$REMOTE:$DEPLOY_PATH/infra/nginx/conf.d/"
 
 if [[ "$TARGET" == "staging" ]]; then
-  rsync "${RSYNC_OPTS[@]}" infra/nginx/certs/                  "$REMOTE:$DEPLOY_PATH/infra/nginx/certs/"
+  rsync "${RSYNC_OPTS[@]}" infra/nginx/certs/                   "$REMOTE:$DEPLOY_PATH/infra/nginx/certs/"
 else
-  rsync "${RSYNC_OPTS[@]}" infra/cloudflare/cf-credentials.ini "$REMOTE:$DEPLOY_PATH/infra/cloudflare/"
+  rsync "${RSYNC_OPTS[@]}" infra/cloudflare/cf-credentials.ini  "$REMOTE:$DEPLOY_PATH/infra/cloudflare/"
 fi
 
-# 环境文件（敏感）—— 传到 remote，重命名为 .env
 rsync "${RSYNC_OPTS[@]}" "$ENV_FILE" "$REMOTE:$DEPLOY_PATH/.env"
+ssh "${SSH_OPTS[@]}" "$REMOTE" "sed -i 's/^IMAGE_TAG=.*/IMAGE_TAG=$TAG/' $DEPLOY_PATH/.env"
 
-IMAGE_TAG="$TAG"
-ssh "${SSH_OPTS[@]}" "$REMOTE" "sed -i 's/^IMAGE_TAG=.*/IMAGE_TAG=$IMAGE_TAG/' $DEPLOY_PATH/.env"
+echo "== [4/6] 原子切换 dist/ =="
+ssh "${SSH_OPTS[@]}" "$REMOTE" bash -se <<EOF
+set -e
+cd "$DEPLOY_PATH"
+if [[ -d dist ]]; then mv dist dist.old.$(date +%s); fi
+mv dist.new dist
+# 保留最近两份 rollback 用
+ls -dt dist.old.* 2>/dev/null | tail -n +3 | xargs -r rm -rf
+# nginx 容器挂的是 bind mount，文件级替换它会直接看到新内容，无需 reload
+EOF
 
-echo "== [3/5] 生产首次签发证书（若未存在）=="
+echo "== [5/6] 启动 / 更新服务 =="
 if [[ "$TARGET" == "production" ]]; then
   ssh "${SSH_OPTS[@]}" "$REMOTE" bash -se <<EOF
 set -e
 cd "$DEPLOY_PATH"
 if ! sudo test -d "/var/lib/docker/volumes/${SITE_SLUG}_certbot-etc/_data/live/${SITE_DOMAIN}"; then
-  echo "首次签发 Let's Encrypt 证书（DNS-01 via Cloudflare）..."
+  echo "首次签发 Let's Encrypt 证书..."
   docker run --rm \
     -v ${SITE_SLUG}_certbot-etc:/etc/letsencrypt \
     -v ${SITE_SLUG}_certbot-www:/var/www/certbot \
@@ -82,7 +101,6 @@ fi
 EOF
 fi
 
-echo "== [4/5] 启动服务 =="
 ssh "${SSH_OPTS[@]}" "$REMOTE" bash -se <<EOF
 set -e
 cd "$DEPLOY_PATH"
@@ -96,18 +114,16 @@ docker compose --env-file .env \
   up -d --remove-orphans
 EOF
 
-echo "== [5/5] 健康检查 =="
-HEALTH_URL="$PUBLIC_SITE_URL"
+echo "== [6/6] 健康检查 =="
 for i in {1..30}; do
-  if curl -fsS -o /dev/null -m 5 "$HEALTH_URL"; then
-    echo "  $HEALTH_URL → OK"
+  if curl -fsS -o /dev/null -m 5 "$PUBLIC_SITE_URL"; then
+    echo "  $PUBLIC_SITE_URL → OK"
     break
   fi
   [[ $i -eq 30 ]] && { echo "健康检查失败"; exit 1; }
   sleep 5
 done
 
-# 生产：确保 CF proxy 开启
 if [[ "$TARGET" == "production" ]]; then
   echo "== 切换 Cloudflare proxy → on =="
   CF_PROXIED=true bash infra/cloudflare/setup-dns.sh "$ENV_FILE"

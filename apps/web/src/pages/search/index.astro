@@ -1,27 +1,53 @@
 ---
 import Base from '@/layouts/Base.astro';
-const q = Astro.url.searchParams.get('q') ?? '';
+// SSG 模式：搜索完全在客户端执行，走 /api/articles（nginx 反代到 Strapi）
 ---
-<Base title={q ? `搜索：${q}` : '搜索'}>
+<Base title="搜索">
   <h1>搜索</h1>
-  <form method="get" action="/search">
-    <input type="search" name="q" value={q} placeholder="输入关键词..." autofocus />
+  <form id="search-form" onsubmit="return false;">
+    <input type="search" id="q" placeholder="输入关键词..." autofocus />
     <button type="submit">搜索</button>
   </form>
-  <div id="results">
-    {q && <p>正在搜索 <strong>{q}</strong> ...</p>}
-  </div>
-  <script define:vars={{ q }}>
-    if (q) {
-      fetch(`/api/search?q=${encodeURIComponent(q)}`)
-        .then((r) => r.json())
-        .then((data) => {
-          const el = document.getElementById('results');
-          if (!data.results?.length) { el.innerHTML = '<p>无结果</p>'; return; }
-          el.innerHTML = '<ul>' + data.results.map(
-            (r) => `<li><a href="/articles/${r.slug}">${r.title}</a><p>${r.excerpt ?? ''}</p></li>`
-          ).join('') + '</ul>';
-        });
+  <div id="results"></div>
+
+  <script is:inline>
+    const form = document.getElementById('search-form');
+    const input = document.getElementById('q');
+    const out = document.getElementById('results');
+
+    // URL 参数回填
+    const initial = new URLSearchParams(location.search).get('q') || '';
+    if (initial) { input.value = initial; runSearch(initial); }
+
+    form.addEventListener('submit', () => {
+      const q = input.value.trim();
+      const u = new URL(location.href);
+      if (q) u.searchParams.set('q', q); else u.searchParams.delete('q');
+      history.replaceState(null, '', u);
+      runSearch(q);
+    });
+
+    async function runSearch(q) {
+      if (!q) { out.innerHTML = ''; return; }
+      out.innerHTML = '<p>搜索中...</p>';
+      const params = new URLSearchParams();
+      params.set('filters[$or][0][title][$containsi]', q);
+      params.set('filters[$or][1][excerpt][$containsi]', q);
+      params.set('pagination[pageSize]', '20');
+      params.set('sort', 'publishedAt:desc');
+      try {
+        const res = await fetch('/api/articles?' + params.toString());
+        if (!res.ok) throw new Error(res.status);
+        const data = await res.json();
+        if (!data.data?.length) { out.innerHTML = '<p>无结果</p>'; return; }
+        out.innerHTML = '<ul>' + data.data.map((d) => {
+          const a = d.attributes;
+          return `<li><a href="/articles/${a.slug}/"><strong>${a.title}</strong></a>
+                    ${a.excerpt ? `<p>${a.excerpt}</p>` : ''}</li>`;
+        }).join('') + '</ul>';
+      } catch (e) {
+        out.innerHTML = '<p>搜索失败: ' + e.message + '</p>';
+      }
     }
   </script>
 </Base>

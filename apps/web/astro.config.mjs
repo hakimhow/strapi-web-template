@@ -1,18 +1,12 @@
 import { defineConfig } from 'astro/config';
-import node from '@astrojs/node';
 
+// SSG 模式：输出纯静态文件到 dist/
+// 动态搜索由 nginx 把 /api/* 代理到 Strapi（同源，免 CORS）
 export default defineConfig({
-  output: 'server',
-  adapter: node({ mode: 'standalone' }),
-  server: {
-    host: true,
-    port: Number(process.env.PORT) || 3000,
-  },
+  output: 'static',
   site: process.env.PUBLIC_SITE_URL,
-  vite: {
-    ssr: {
-      // 防止 SSR 打包时把 Strapi 客户端视为纯 ESM 问题
-      noExternal: [],
-    },
+  build: {
+    // 详情页等输出为 /articles/foo/index.html，便于 nginx 直出
+    format: 'directory',
   },
 });

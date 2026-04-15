@@ -1,4 +1,4 @@
-# Production（远程 VPS）：nginx + certbot（DNS-01 via Cloudflare，因为 CF proxy 开启）
+# Production（远程 VPS）：nginx 直接服务 dist/；certbot 走 CF DNS-01
 services:
   nginx:
     image: nginx:1.27-alpine
@@ -11,8 +11,8 @@ services:
       - ../nginx/conf.d/prod.conf:/etc/nginx/conf.d/default.conf:ro
       - certbot-etc:/etc/letsencrypt:ro
       - certbot-www:/var/www/certbot:ro
+      - ${DEPLOY_PATH:-.}/dist:/srv/www:ro
     depends_on:
-      - web
       - cms
       - imagor
     networks: [internal]
@@ -24,7 +24,6 @@ services:
       - certbot-etc:/etc/letsencrypt
       - certbot-www:/var/www/certbot
       - ../cloudflare/cf-credentials.ini:/etc/letsencrypt/cf-credentials.ini:ro
-    # 首次签发由 scripts/deploy.sh 手动触发；此容器常驻用于 renew
     entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew --quiet; sleep 12h & wait $${!}; done"
 
 volumes:

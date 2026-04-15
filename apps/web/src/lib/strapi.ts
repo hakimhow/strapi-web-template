@@ -1,15 +1,12 @@
-// Strapi 客户端 —— SSR 时优先走 INTERNAL_STRAPI_URL（docker 内网），
-// 浏览器侧走 PUBLIC_STRAPI_URL。
+// Strapi 客户端（SSG）—— 只在 build 时在 Node 里执行。
+// 浏览器端不用这个模块；动态搜索直接 fetch('/api/...') 让 nginx 代理。
 
-const INTERNAL = import.meta.env.INTERNAL_STRAPI_URL ?? process.env.INTERNAL_STRAPI_URL;
-const PUBLIC = import.meta.env.PUBLIC_STRAPI_URL;
-const TOKEN = import.meta.env.STRAPI_PUBLIC_TOKEN ?? process.env.STRAPI_PUBLIC_TOKEN;
+const BUILD_STRAPI_URL =
+  process.env.INTERNAL_STRAPI_URL ||
+  process.env.PUBLIC_STRAPI_URL ||
+  'http://localhost:1337';
 
-export function strapiBase(): string {
-  // Astro SSR 在 Node 下执行时 import.meta.env.SSR === true
-  if (import.meta.env.SSR && INTERNAL) return INTERNAL;
-  return PUBLIC;
-}
+const TOKEN = process.env.STRAPI_PUBLIC_TOKEN;
 
 export interface StrapiListParams {
   filters?: Record<string, unknown>;
@@ -27,7 +24,6 @@ function qs(params: StrapiListParams): string {
   if (params.pagination?.pageSize) sp.set('pagination[pageSize]', String(params.pagination.pageSize));
   if (params.populate) sp.set('populate', JSON.stringify(params.populate));
   if (params.filters) {
-    // 简单扁平化：filters[field][op]=value
     const flat = (obj: Record<string, unknown>, prefix = 'filters'): void => {
       for (const [k, v] of Object.entries(obj)) {
         const key = `${prefix}[${k}]`;
@@ -41,7 +37,7 @@ function qs(params: StrapiListParams): string {
 }
 
 export async function strapiGet<T>(path: string, params: StrapiListParams = {}): Promise<T> {
-  const url = `${strapiBase()}/api${path}${Object.keys(params).length ? `?${qs(params)}` : ''}`;
+  const url = `${BUILD_STRAPI_URL}/api${path}${Object.keys(params).length ? `?${qs(params)}` : ''}`;
   const res = await fetch(url, {
     headers: TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {},
   });
@@ -49,9 +45,8 @@ export async function strapiGet<T>(path: string, params: StrapiListParams = {}):
   return (await res.json()) as T;
 }
 
-// Imagor 便捷 URL 生成（开发 unsafe，生产签名）
 export function imagorUrl(src: string, opts: { width?: number; height?: number; fit?: 'fit-in' | 'smart' } = {}): string {
-  const base = import.meta.env.PUBLIC_IMAGOR_URL;
+  const base = process.env.PUBLIC_IMAGOR_URL || '/cdn';
   const parts: string[] = [];
   if (opts.fit) parts.push(opts.fit);
   if (opts.width || opts.height) parts.push(`${opts.width ?? 0}x${opts.height ?? 0}`);
