@@ -3,6 +3,15 @@
 通用可复制的网站模板 —— Astro SSR + Strapi CMS + PostgreSQL + Imagor，
 本地 Docker 开发，nginx 反代，Cloudflare DNS，通过 GHCR 部署到 VPS。
 
+## 两个分支 —— 按客户需求选
+
+| 分支       | 渲染模式 | 运行时        | 适合场景                                   |
+| ---        | ---      | ---           | ---                                        |
+| **`main`** | Astro SSR（Node） | web 容器常驻 | 发布即可见、动态数据多、需要草稿预览         |
+| **`ssg`**  | Astro SSG（纯静态）| 只 nginx 出 dist/ | 官网/产品站/博客/案例 —— 低频更新、要求快 |
+
+克隆后 `git checkout ssg` 切换到静态方案。两个分支目录结构一致，只在 `apps/web`、compose、nginx、deploy 脚本上有差异。
+
 ## 技术栈
 
 | 角色         | 技术                              |
