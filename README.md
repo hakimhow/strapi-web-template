@@ -1,5 +1,6 @@
-# Astro + Strapi Site Template —— SSG 分支
+# strapi-web-template —— SSG 分支
 
+> 仓库：<https://github.com/hakimhow/strapi-web-template>
 > 当前分支：**`ssg`** —— 纯静态生成，nginx 直出 `dist/`，Cloudflare Tunnel 暴露。
 > SSR 版本在 `main` 分支：`git checkout main`。
 
@@ -52,8 +53,9 @@ nginx（HTTP only，80 端口不对外暴露）
 ## 快速开始 —— 建一个新站
 
 ```bash
-# 1. 基于模板创建（GitHub Use this template），clone 后切分支
-git clone git@github.com:you/new-site.git && cd new-site
+# 1. 在 GitHub 上点击 "Use this template" 创建新站仓库，再 clone：
+#    https://github.com/hakimhow/strapi-web-template → Use this template
+git clone git@github.com:<your-user>/<new-site>.git && cd <new-site>
 git checkout ssg
 
 # 2. 交互式初始化：会问域名、CF Tunnel token、VPN 内 VPS 地址、SSH key 等
