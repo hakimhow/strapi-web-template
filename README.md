@@ -1,7 +1,9 @@
-# Astro + Strapi Site Template
+# strapi-web-template
 
-通用可复制的网站模板 —— Astro SSR + Strapi CMS + PostgreSQL + Imagor，
-本地 Docker 开发，nginx 反代，Cloudflare DNS，通过 GHCR 部署到 VPS。
+通用可复制的网站模板 —— Astro + Strapi CMS + PostgreSQL + Imagor，
+本地 Docker 开发，nginx 反代，Cloudflare，通过 GHCR 部署到 VPS。
+
+仓库：<https://github.com/hakimhow/strapi-web-template>
 
 ## 两个分支 —— 按客户需求选
 
@@ -28,8 +30,9 @@
 ## 快速开始 —— 新建一个站
 
 ```bash
-# 1. 基于 template 创建新仓库（GitHub 网页 "Use this template"）
-git clone git@github.com:you/new-site.git && cd new-site
+# 1. 在 GitHub 上点击 "Use this template" 创建新站仓库，再 clone：
+#    https://github.com/hakimhow/strapi-web-template → Use this template
+git clone git@github.com:<your-user>/<new-site>.git && cd <new-site>
 
 # 2. 交互式初始化（会问域名、CF token、SSH key 等）
 ./scripts/init-site.sh
