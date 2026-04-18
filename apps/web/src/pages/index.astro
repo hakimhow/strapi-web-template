@@ -1,11 +1,10 @@
 ---
 import Base from '@/layouts/Base.astro';
-import { strapiGet } from '@/lib/strapi';
+import { strapiGet, type StrapiList } from '@/lib/strapi';
 
-interface StrapiList<T> { data: Array<{ id: number; attributes: T }>; }
 interface Article { title: string; slug: string; excerpt?: string; }
 
-let articles: Array<{ id: number; attributes: Article }> = [];
+let articles: StrapiList<Article>['data'] = [];
 try {
   const res = await strapiGet<StrapiList<Article>>('/articles', {
     sort: 'publishedAt:desc',
@@ -20,7 +19,7 @@ try {
   <h1>最新文章</h1>
   <ul>
     {articles.map((a) => (
-      <li><a href={`/articles/${a.attributes.slug}`}>{a.attributes.title}</a></li>
+      <li><a href={`/articles/${a.slug}`}>{a.title}</a></li>
     ))}
   </ul>
   {articles.length === 0 && <p>还没有内容 —— 请到 <a href={import.meta.env.PUBLIC_STRAPI_URL + '/admin'}>Strapi 后台</a> 创建。</p>}

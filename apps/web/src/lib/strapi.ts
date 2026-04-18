@@ -1,33 +1,61 @@
-// Strapi 客户端 —— SSR 时优先走 INTERNAL_STRAPI_URL（docker 内网），
+// Strapi v5 客户端 —— SSR 时优先走 INTERNAL_STRAPI_URL（docker 内网），
 // 浏览器侧走 PUBLIC_STRAPI_URL。
+//
+// v5 响应格式（扁平，没有 .attributes 包裹）：
+//   { data: [{ id, documentId, title, slug, ... }], meta: { pagination: {...} } }
 
 const INTERNAL = import.meta.env.INTERNAL_STRAPI_URL ?? process.env.INTERNAL_STRAPI_URL;
 const PUBLIC = import.meta.env.PUBLIC_STRAPI_URL;
 const TOKEN = import.meta.env.STRAPI_PUBLIC_TOKEN ?? process.env.STRAPI_PUBLIC_TOKEN;
 
 export function strapiBase(): string {
-  // Astro SSR 在 Node 下执行时 import.meta.env.SSR === true
   if (import.meta.env.SSR && INTERNAL) return INTERNAL;
   return PUBLIC;
+}
+
+/** v5 实体基础字段：documentId（字符串）是内容的稳定引用，id 仅在数据库内部用 */
+export interface StrapiEntity {
+  id: number;
+  documentId: string;
+  createdAt?: string;
+  updatedAt?: string;
+  publishedAt?: string;
+  locale?: string | null;
+}
+
+export interface StrapiList<T> {
+  data: Array<T & StrapiEntity>;
+  meta: {
+    pagination: { page: number; pageSize: number; pageCount: number; total: number };
+  };
+}
+
+export interface StrapiSingle<T> {
+  data: (T & StrapiEntity) | null;
+  meta: Record<string, unknown>;
 }
 
 export interface StrapiListParams {
   filters?: Record<string, unknown>;
   sort?: string | string[];
-  pagination?: { page?: number; pageSize?: number };
+  pagination?: { page?: number; pageSize?: number; withCount?: boolean };
   populate?: string | string[] | Record<string, unknown>;
+  fields?: string[];
+  status?: 'published' | 'draft';   // v5：替代 v4 的 publicationState
+  locale?: string;
 }
 
 function qs(params: StrapiListParams): string {
   const sp = new URLSearchParams();
-  if (params.sort) {
-    ([] as string[]).concat(params.sort).forEach((s) => sp.append('sort', s));
-  }
+  if (params.sort) ([] as string[]).concat(params.sort).forEach((s) => sp.append('sort', s));
   if (params.pagination?.page) sp.set('pagination[page]', String(params.pagination.page));
   if (params.pagination?.pageSize) sp.set('pagination[pageSize]', String(params.pagination.pageSize));
+  if (params.pagination?.withCount !== undefined) sp.set('pagination[withCount]', String(params.pagination.withCount));
   if (params.populate) sp.set('populate', JSON.stringify(params.populate));
+  if (params.fields) params.fields.forEach((f, i) => sp.set(`fields[${i}]`, f));
+  if (params.status) sp.set('status', params.status);
+  if (params.locale) sp.set('locale', params.locale);
   if (params.filters) {
-    // 简单扁平化：filters[field][op]=value
     const flat = (obj: Record<string, unknown>, prefix = 'filters'): void => {
       for (const [k, v] of Object.entries(obj)) {
         const key = `${prefix}[${k}]`;
@@ -49,7 +77,6 @@ export async function strapiGet<T>(path: string, params: StrapiListParams = {}):
   return (await res.json()) as T;
 }
 
-// Imagor 便捷 URL 生成（开发 unsafe，生产签名）
 export function imagorUrl(src: string, opts: { width?: number; height?: number; fit?: 'fit-in' | 'smart' } = {}): string {
   const base = import.meta.env.PUBLIC_IMAGOR_URL;
   const parts: string[] = [];

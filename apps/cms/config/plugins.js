@@ -1,5 +1,6 @@
+// Strapi v5 —— i18n 已内置，不再需要单独的 plugin。
+// 这里保留 upload 配置；其余按需扩展。
 module.exports = ({ env }) => ({
-  // 默认图片由 Strapi 存本地，imagor 读取同一卷进行处理
   upload: {
     config: {
       provider: 'local',
