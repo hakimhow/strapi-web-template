@@ -19,7 +19,7 @@
 | 角色         | 技术                              |
 | ---          | ---                               |
 | 前端         | Astro (Node SSR)                  |
-| CMS          | Strapi v4                         |
+| CMS          | Strapi v5（扁平响应 + documentId）|
 | 数据库       | PostgreSQL 16                     |
 | 图片处理     | Imagor                            |
 | 反向代理     | nginx (+ certbot)                 |
