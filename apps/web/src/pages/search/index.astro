@@ -1,6 +1,6 @@
 ---
 import Base from '@/layouts/Base.astro';
-// SSG 模式：搜索完全在客户端执行，走 /api/articles（nginx 反代到 Strapi）
+// SSG 模式：搜索完全在客户端执行，走 /api/articles（nginx 反代到 Strapi v5）
 ---
 <Base title="搜索">
   <h1>搜索</h1>
@@ -35,15 +35,16 @@ import Base from '@/layouts/Base.astro';
       params.set('filters[$or][1][excerpt][$containsi]', q);
       params.set('pagination[pageSize]', '20');
       params.set('sort', 'publishedAt:desc');
+      params.set('status', 'published'); // v5：替代 publicationState
       try {
         const res = await fetch('/api/articles?' + params.toString());
         if (!res.ok) throw new Error(res.status);
         const data = await res.json();
         if (!data.data?.length) { out.innerHTML = '<p>无结果</p>'; return; }
+        // v5 扁平响应：直接读 d.title / d.slug，不再有 d.attributes
         out.innerHTML = '<ul>' + data.data.map((d) => {
-          const a = d.attributes;
-          return `<li><a href="/articles/${a.slug}/"><strong>${a.title}</strong></a>
-                    ${a.excerpt ? `<p>${a.excerpt}</p>` : ''}</li>`;
+          return `<li><a href="/articles/${d.slug}/"><strong>${d.title}</strong></a>
+                    ${d.excerpt ? `<p>${d.excerpt}</p>` : ''}</li>`;
         }).join('') + '</ul>';
       } catch (e) {
         out.innerHTML = '<p>搜索失败: ' + e.message + '</p>';

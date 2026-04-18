@@ -1,19 +1,19 @@
 ---
 import Base from '@/layouts/Base.astro';
-import { strapiGet } from '@/lib/strapi';
+import { strapiGet, type StrapiList } from '@/lib/strapi';
 
-interface StrapiList<T> { data: Array<{ id: number; attributes: T }>; }
 interface Article { title: string; slug: string; excerpt?: string; content?: string; }
 
-// SSG：构建时枚举全部文章
+// SSG：构建时枚举全部文章（v5 扁平响应，直接 d.slug）
 export async function getStaticPaths() {
   try {
     const res = await strapiGet<StrapiList<Article>>('/articles', {
       pagination: { pageSize: 1000 },
+      status: 'published',
     });
     return res.data.map((d) => ({
-      params: { slug: d.attributes.slug },
-      props: { article: d.attributes },
+      params: { slug: d.slug },
+      props: { article: d },
     }));
   } catch (e) {
     console.warn('getStaticPaths: Strapi unreachable, no articles pre-rendered', e);

@@ -7,8 +7,14 @@
     "displayName": "Article",
     "description": "示例文章类型 —— 可按项目删除或改造"
   },
-  "options": { "draftAndPublish": true },
-  "pluginOptions": { "i18n": { "localized": true } },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {
+    "i18n": {
+      "localized": true
+    }
+  },
   "attributes": {
     "title": {
       "type": "string",
