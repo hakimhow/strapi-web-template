@@ -17,12 +17,12 @@ try {
   console.warn('build-time fetch failed:', e);
 }
 ---
-<Base title="首页">
-  <h1>最新文章</h1>
+<Base title="Home">
+  <h1>Latest articles</h1>
   <ul>
     {articles.map((a) => (
       <li><a href={`/articles/${a.slug}/`}>{a.title}</a></li>
     ))}
   </ul>
-  {articles.length === 0 && <p>构建时未获取到内容 —— 请检查 Strapi 是否可达，并确认已发布文章。</p>}
+  {articles.length === 0 && <p>No content fetched at build time — check that Strapi is reachable and that articles have been published.</p>}
 </Base>

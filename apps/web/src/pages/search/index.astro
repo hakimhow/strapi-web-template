@@ -2,11 +2,11 @@
 import Base from '@/layouts/Base.astro';
 // SSG 模式：搜索完全在客户端执行，走 /api/articles（nginx 反代到 Strapi v5）
 ---
-<Base title="搜索">
-  <h1>搜索</h1>
+<Base title="Search">
+  <h1>Search</h1>
   <form id="search-form" onsubmit="return false;">
-    <input type="search" id="q" placeholder="输入关键词..." autofocus />
-    <button type="submit">搜索</button>
+    <input type="search" id="q" placeholder="Enter keywords..." autofocus />
+    <button type="submit">Search</button>
   </form>
   <div id="results"></div>
 
@@ -29,7 +29,7 @@ import Base from '@/layouts/Base.astro';
 
     async function runSearch(q) {
       if (!q) { out.innerHTML = ''; return; }
-      out.innerHTML = '<p>搜索中...</p>';
+      out.innerHTML = '<p>Searching...</p>';
       const params = new URLSearchParams();
       params.set('filters[$or][0][title][$containsi]', q);
       params.set('filters[$or][1][excerpt][$containsi]', q);
@@ -40,14 +40,14 @@ import Base from '@/layouts/Base.astro';
         const res = await fetch('/api/articles?' + params.toString());
         if (!res.ok) throw new Error(res.status);
         const data = await res.json();
-        if (!data.data?.length) { out.innerHTML = '<p>无结果</p>'; return; }
+        if (!data.data?.length) { out.innerHTML = '<p>No results</p>'; return; }
         // v5 扁平响应：直接读 d.title / d.slug，不再有 d.attributes
         out.innerHTML = '<ul>' + data.data.map((d) => {
           return `<li><a href="/articles/${d.slug}/"><strong>${d.title}</strong></a>
                     ${d.excerpt ? `<p>${d.excerpt}</p>` : ''}</li>`;
         }).join('') + '</ul>';
       } catch (e) {
-        out.innerHTML = '<p>搜索失败: ' + e.message + '</p>';
+        out.innerHTML = '<p>Search failed: ' + e.message + '</p>';
       }
     }
   </script>
