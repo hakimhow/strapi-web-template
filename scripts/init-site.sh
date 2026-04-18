@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
-# 交互式初始化一个新站点：
-# - 询问域名、CF token、SSH key、远程服务器等
-# - 生成 .env.local / .env.staging / .env.production
-# - 生成 infra/cloudflare/cf-credentials.ini（certbot 用）
-# - 生成 infra/nginx/certs/staging.{crt,key}（自签）
-# - 根据 SITE_DOMAIN 渲染 infra/nginx/conf.d/prod.conf 里的 ${...} 占位
-# - 首次 git init + commit
+# 交互式初始化一个新站点（SSG + 无公网 IP VPS + Cloudflare Tunnel）
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -14,40 +8,57 @@ cd "$ROOT"
 bold() { printf "\033[1m%s\033[0m\n" "$*"; }
 ask() {
   local var="$1" prompt="$2" default="${3:-}" val=""
-  if [[ -n "$default" ]]; then
-    read -rp "$prompt [$default]: " val
-    val="${val:-$default}"
-  else
-    read -rp "$prompt: " val
-  fi
+  if [[ -n "$default" ]]; then read -rp "$prompt [$default]: " val; val="${val:-$default}"
+  else read -rp "$prompt: " val; fi
   eval "$var=\$val"
 }
-ask_secret() {
-  local var="$1" prompt="$2" val=""
-  read -rsp "$prompt: " val; echo
-  eval "$var=\$val"
-}
+ask_secret() { local var="$1" prompt="$2" val=""; read -rsp "$prompt: " val; echo; eval "$var=\$val"; }
 rand() { openssl rand -base64 "${1:-32}" | tr -d '\n=/+' | head -c "${1:-32}"; }
 
-bold "== Astro+Strapi 站点初始化 =="
+bold "== Astro+Strapi SSG 站点初始化（CF Tunnel 架构）=="
 
-ask SITE_SLUG       "站点 slug（小写、短横线）" "$(basename "$ROOT" | tr '_' '-' | tr '[:upper:]' '[:lower:]')"
-ask SITE_DOMAIN     "主域名（如 acme.com）"
-ask CMS_SUBDOMAIN   "Strapi 子域名前缀" "cms"
-ask ACME_EMAIL      "Let's Encrypt 联系邮箱"
+ask SITE_SLUG     "站点 slug（小写、短横线）" "$(basename "$ROOT" | tr '_' '-' | tr '[:upper:]' '[:lower:]')"
+ask SITE_DOMAIN   "主域名（如 acme.com）"
+ask CMS_SUBDOMAIN "Strapi 子域名前缀" "cms"
 
-bold "== Cloudflare =="
-ask_secret CF_API_TOKEN "Cloudflare API Token（Zone:DNS:Edit）"
-ask        CF_ZONE_ID   "Cloudflare Zone ID"
+bold "== Cloudflare Tunnel =="
+echo "两种模式选一："
+echo "  A) token 模式 —— 在 Cloudflare Dashboard 手动建 tunnel，复制 token 粘贴（最简单）"
+echo "  B) CLI 模式  —— 本机已装 cloudflared 且已 login，脚本自动建 tunnel"
+ask CF_TUNNEL_MODE "选择模式 [A/B]" "A"
 
-bold "== 远程服务器（生产）=="
-ask DEPLOY_HOST    "远程服务器 IP 或域名"
+case "${CF_TUNNEL_MODE^^}" in
+  A)
+    echo "打开：https://one.dash.cloudflare.com/ → Networks → Tunnels → Create a tunnel"
+    echo "类型选 Cloudflared，命名为 $SITE_SLUG，创建后复制 token"
+    ask_secret CF_TUNNEL_TOKEN "粘贴 Tunnel Token"
+    echo "记得在 tunnel 的 Public Hostnames 里加："
+    echo "    $SITE_DOMAIN             → http://nginx:80"
+    echo "    www.$SITE_DOMAIN         → http://nginx:80"
+    echo "    $CMS_SUBDOMAIN.$SITE_DOMAIN → http://nginx:80"
+    echo "    cdn.$SITE_DOMAIN         → http://nginx:80"
+    ;;
+  B)
+    command -v cloudflared >/dev/null || { echo "未找到 cloudflared，请先安装或用模式 A"; exit 1; }
+    bash infra/cloudflare/setup-tunnel.sh /dev/stdin <<EOF
+SITE_SLUG=$SITE_SLUG
+SITE_DOMAIN=$SITE_DOMAIN
+CMS_SUBDOMAIN=$CMS_SUBDOMAIN
+EOF
+    echo "从上面输出复制 Tunnel Token："
+    ask_secret CF_TUNNEL_TOKEN "粘贴 Tunnel Token"
+    ;;
+esac
+
+bold "== 远程服务器（生产，通过 VPN 访问）=="
+echo "提醒：VPS 无公网 IP，下面填的是 VPN 内网地址"
+ask DEPLOY_HOST    "VPS 内网 IP / 主机名"
 ask DEPLOY_USER    "SSH 用户" "deploy"
 ask DEPLOY_SSH_KEY "本地 SSH 私钥路径" "$HOME/.ssh/id_ed25519"
 ask DEPLOY_PATH    "远程部署目录" "/srv/$SITE_SLUG"
 
-bold "== 本地服务器（staging）=="
-ask STAGING_HOST    "本地服务器 IP（局域网内）"
+bold "== 本地服务器（staging，局域网）=="
+ask STAGING_HOST    "本地测试服务器 IP"
 ask STAGING_USER    "SSH 用户" "deploy"
 ask STAGING_SSH_KEY "本地 SSH 私钥路径" "$HOME/.ssh/id_ed25519"
 ask STAGING_PATH    "远程部署目录" "/srv/$SITE_SLUG"
@@ -55,7 +66,7 @@ ask STAGING_PATH    "远程部署目录" "/srv/$SITE_SLUG"
 bold "== GHCR =="
 ask GHCR_USER "GitHub 用户名/组织"
 
-# 自动生成密钥
+# 生成密钥
 STRAPI_APP_KEYS="$(rand 24),$(rand 24),$(rand 24),$(rand 24)"
 STRAPI_API_TOKEN_SALT="$(rand)"
 STRAPI_ADMIN_JWT_SECRET="$(rand)"
@@ -63,9 +74,10 @@ STRAPI_JWT_SECRET="$(rand)"
 STRAPI_TRANSFER_TOKEN_SALT="$(rand)"
 DB_PASSWORD="$(rand 24)"
 IMAGOR_SECRET="$(rand)"
+WEBHOOK_SECRET="$(rand)"
 
 write_env() {
-  local file="$1" env="$2" site_url="$3" strapi_url="$4" imagor_url="$5" proxied="$6" unsafe="$7" ssh_key="$8" host="$9" path="${10}" user="${11}"
+  local file="$1" env="$2" site_url="$3" strapi_url="$4" imagor_url="$5" unsafe="$6" ssh_key="$7" host="$8" path="$9" user="${10}" tunnel_token="${11}"
   cat > "$file" <<EOF
 SITE_SLUG=$SITE_SLUG
 SITE_DOMAIN=$SITE_DOMAIN
@@ -99,9 +111,8 @@ DB_SSL=false
 IMAGOR_SECRET=$IMAGOR_SECRET
 IMAGOR_UNSAFE=$unsafe
 
-CF_API_TOKEN=$CF_API_TOKEN
-CF_ZONE_ID=$CF_ZONE_ID
-CF_PROXIED=$proxied
+CF_TUNNEL_TOKEN=$tunnel_token
+CMS_SUBDOMAIN=$CMS_SUBDOMAIN
 
 DEPLOY_HOST=$host
 DEPLOY_USER=$user
@@ -109,30 +120,22 @@ DEPLOY_SSH_KEY=$ssh_key
 DEPLOY_PATH=$path
 
 GHCR_USER=$GHCR_USER
-GHCR_IMAGE_WEB=ghcr.io/$GHCR_USER/$SITE_SLUG-web
 GHCR_IMAGE_CMS=ghcr.io/$GHCR_USER/$SITE_SLUG-cms
 IMAGE_TAG=latest
 
-ACME_EMAIL=$ACME_EMAIL
-CMS_SUBDOMAIN=$CMS_SUBDOMAIN
+WEBHOOK_SECRET=$WEBHOOK_SECRET
 EOF
   chmod 600 "$file"
   echo "  写入 $file"
 }
 
 bold "== 生成环境文件 =="
-write_env .env.local      local      "http://localhost:3000" "http://localhost:1337" "http://localhost:8000" "false" "1" "" "" "" ""
-write_env .env.staging    staging    "https://${SITE_DOMAIN}.local.test" "https://${CMS_SUBDOMAIN}.${SITE_DOMAIN}.local.test" "https://cdn.${SITE_DOMAIN}.local.test" "false" "1" "$STAGING_SSH_KEY" "$STAGING_HOST" "$STAGING_PATH" "$STAGING_USER"
-write_env .env.production production "https://${SITE_DOMAIN}" "https://${CMS_SUBDOMAIN}.${SITE_DOMAIN}" "https://cdn.${SITE_DOMAIN}" "true" "0" "$DEPLOY_SSH_KEY" "$DEPLOY_HOST" "$DEPLOY_PATH" "$DEPLOY_USER"
-
-bold "== Cloudflare 凭证（certbot）=="
-cat > infra/cloudflare/cf-credentials.ini <<EOF
-dns_cloudflare_api_token = $CF_API_TOKEN
-EOF
-chmod 600 infra/cloudflare/cf-credentials.ini
-echo "  写入 infra/cloudflare/cf-credentials.ini"
+write_env .env.local      local      "http://localhost:3000" "http://localhost:1337" "http://localhost:8000" "1" "" "" "" "" ""
+write_env .env.staging    staging    "https://${SITE_DOMAIN}.local.test" "https://${CMS_SUBDOMAIN}.${SITE_DOMAIN}.local.test" "https://cdn.${SITE_DOMAIN}.local.test" "1" "$STAGING_SSH_KEY" "$STAGING_HOST" "$STAGING_PATH" "$STAGING_USER" ""
+write_env .env.production production "https://${SITE_DOMAIN}" "https://${CMS_SUBDOMAIN}.${SITE_DOMAIN}" "https://cdn.${SITE_DOMAIN}" "0" "$DEPLOY_SSH_KEY" "$DEPLOY_HOST" "$DEPLOY_PATH" "$DEPLOY_USER" "$CF_TUNNEL_TOKEN"
 
 bold "== 生成 staging 自签证书 =="
+# staging 在内网，仍然需要 HTTPS 模拟生产；CF Tunnel 只管生产
 if ! [[ -f infra/nginx/certs/staging.crt ]]; then
   openssl req -x509 -nodes -newkey rsa:2048 -days 825 \
     -keyout infra/nginx/certs/staging.key \
@@ -140,47 +143,43 @@ if ! [[ -f infra/nginx/certs/staging.crt ]]; then
     -subj "/CN=*.${SITE_DOMAIN}.local.test" \
     -addext "subjectAltName=DNS:${SITE_DOMAIN}.local.test,DNS:*.${SITE_DOMAIN}.local.test" 2>/dev/null
   echo "  生成 infra/nginx/certs/staging.{crt,key}"
-else
-  echo "  已存在，跳过"
 fi
 
 bold "== 渲染 prod.conf 占位 =="
-# 备份原模板一次
 [[ -f infra/nginx/conf.d/prod.conf.tpl ]] || cp infra/nginx/conf.d/prod.conf infra/nginx/conf.d/prod.conf.tpl
 SITE_DOMAIN="$SITE_DOMAIN" CMS_SUBDOMAIN="$CMS_SUBDOMAIN" \
   envsubst '$SITE_DOMAIN $CMS_SUBDOMAIN' \
   < infra/nginx/conf.d/prod.conf.tpl \
   > infra/nginx/conf.d/prod.conf
-echo "  渲染完成"
-
-bold "== 创建 Cloudflare DNS 记录（仅 DNS，proxy 关闭）=="
-read -rp "现在就调 CF API 创建 DNS 记录吗？[y/N]: " yn
-if [[ "$yn" =~ ^[Yy]$ ]]; then
-  CF_PROXIED=false bash infra/cloudflare/setup-dns.sh .env.production
-fi
 
 bold "== git 初始化 =="
 if ! [[ -d .git ]]; then
   git init -q
   git add .
   git commit -q -m "chore: init site $SITE_SLUG from template"
-  echo "  git 仓库已初始化"
-else
-  echo "  已是 git 仓库，跳过"
 fi
 
 bold "== 完成 =="
 cat <<EOF
 
 下一步：
-  make dev                       # 本地开发
-  访问 http://localhost:3000     # 前端
-  访问 http://localhost:1337/admin  # 创建 Strapi 管理员
+  本地开发：
+    make dev
+    → http://localhost:3000（前端）
+    → http://localhost:1337/admin（Strapi，创建管理员）
 
-发布前：
-  1. 在 Strapi admin 生成一个只读 API token，填入 .env.production 的 STRAPI_PUBLIC_TOKEN
-  2. make push                                 # 构建并推送镜像到 GHCR
-  3. ./scripts/deploy.sh staging               # 先发本地服务器确认
-  4. ./scripts/deploy.sh production            # 最后发生产 VPS
-     （部署脚本会自动切换 CF proxy → on）
+  首次生产部署（两阶段）：
+    1. VPN 连上 VPS 网络
+    2. ./scripts/deploy.sh production --cms-first
+       → 只起 cms + postgres + imagor + cloudflared
+       → 等 cloudflared 建好 tunnel，$PUBLIC_STRAPI_URL/admin 就可达
+    3. 在 Strapi admin：
+       - 创建管理员账号
+       - Settings → API Tokens → 建一个只读 token
+       - 发布至少 1 篇示例文章
+    4. 把 token 填入 .env.production 的 STRAPI_PUBLIC_TOKEN
+    5. ./scripts/deploy.sh production
+       → 本地 build 前端 → rsync dist/ → nginx 直出
+
+  Portainer 可以把 $DEPLOY_PATH 下的 compose 作为 Stack 纳管用于日常监控。
 EOF

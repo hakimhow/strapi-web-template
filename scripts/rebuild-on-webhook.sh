@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# 在远程服务器上以 systemd 服务方式运行的 webhook 接收器。
-# Strapi 发布文章后 POST 到本服务，触发 rebuild → 原子替换 dist/。
+# Webhook 接收器 —— 在 VPS 上以 systemd 服务运行，收到 Strapi 发布事件后重建 dist/
 #
-# 安装（在远程服务器上一次性执行）：
+# 这里用 python3 的 http.server 作接收端（Linux 预装），避免装 ncat/webhook 等第三方工具。
+# 如果 VPS 没 python3，可用 `docker run --rm node:20-alpine node -e ...` 替代。
+#
+# 安装（在 VPS 上执行一次，可通过 Portainer 的 Exec 或 VPN SSH）：
 #   sudo cp scripts/rebuild-on-webhook.sh /usr/local/bin/
 #   sudo cp scripts/rebuild-on-webhook.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
 #   sudo systemctl enable --now rebuild-on-webhook
-#
-# Strapi 里配 webhook URL: https://<site>/hooks/rebuild
-# nginx 把 /hooks/rebuild 代理到 127.0.0.1:9999
 
 set -euo pipefail
 PORT="${WEBHOOK_PORT:-9999}"
@@ -17,13 +17,20 @@ SECRET="${WEBHOOK_SECRET:-}"
 
 log() { echo "[$(date -Iseconds)] $*"; }
 
+# 防抖：10 秒内多次触发合并成一次
+DEBOUNCE_FILE=/tmp/rebuild.trigger
+REBUILD_RUNNING=/tmp/rebuild.running
+
 rebuild() {
+  [[ -f "$REBUILD_RUNNING" ]] && { log "已有 rebuild 在跑，跳过"; return; }
+  touch "$REBUILD_RUNNING"
+  trap 'rm -f "$REBUILD_RUNNING"' EXIT
+
   log "开始 rebuild"
   cd "$SITE_PATH"
-  # .env 已同步到服务器；读取出来供 build 用
   set -a; source .env; set +a
 
-  # 在容器里构建（避免污染宿主机 node 环境）
+  # 在容器里构建，避免污染宿主机
   docker run --rm \
     -v "$SITE_PATH/apps/web:/opt/app" \
     -w /opt/app \
@@ -36,30 +43,41 @@ rebuild() {
     node:20-alpine \
     sh -c "npm ci --silent && npm run build"
 
-  # 原子替换
   if [[ -d dist ]]; then mv dist "dist.old.$(date +%s)"; fi
   mv apps/web/dist dist
   ls -dt dist.old.* 2>/dev/null | tail -n +3 | xargs -r rm -rf
   log "rebuild 完成"
 }
 
-# 简易 HTTP 接收器（仅内网，经 nginx 代理进来）
-while true; do
+# 防抖消费循环
+watcher() {
+  while true; do
+    if [[ -f "$DEBOUNCE_FILE" ]]; then
+      sleep 10   # 积攒 10 秒内的触发
+      rm -f "$DEBOUNCE_FILE"
+      rebuild || log "rebuild 失败"
+    fi
+    sleep 1
+  done
+}
+
+# HTTP 接收器（python 原生，不依赖额外包）
+receiver() {
   log "监听 127.0.0.1:$PORT"
-  # 用 ncat 接一个请求
-  REQ="$(ncat -l -p "$PORT" -q 1 -w 30 2>/dev/null || true)"
-  [[ -z "$REQ" ]] && continue
+  python3 -c "
+import http.server, os
+SECRET = os.environ.get('SECRET', '')
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        sig = self.headers.get('X-Strapi-Signature', '')
+        if SECRET and sig != SECRET:
+            self.send_response(403); self.end_headers(); return
+        with open('${DEBOUNCE_FILE}', 'w') as f: f.write('go')
+        self.send_response(202); self.end_headers(); self.wfile.write(b'queued')
+    def log_message(self, *a): pass
+http.server.HTTPServer(('127.0.0.1', ${PORT}), H).serve_forever()
+"
+}
 
-  if [[ -n "$SECRET" ]] && ! grep -q "X-Strapi-Signature: $SECRET" <<<"$REQ"; then
-    log "签名无效，忽略"
-    continue
-  fi
-
-  # 防抖：10 秒内多次 publish 只构建一次
-  if [[ -f /tmp/rebuild.lock ]] && (( $(date +%s) - $(stat -c %Y /tmp/rebuild.lock) < 10 )); then
-    log "防抖中，跳过"
-    continue
-  fi
-  touch /tmp/rebuild.lock
-  rebuild || log "rebuild 失败"
-done
+watcher &
+SECRET="$SECRET" receiver

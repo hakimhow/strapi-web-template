@@ -8,8 +8,7 @@ Type=simple
 User=deploy
 Environment=SITE_PATH=/srv/example-site
 Environment=WEBHOOK_PORT=9999
-# 建议在 Strapi 后台 webhook 设置里添加 header:
-#   X-Strapi-Signature: <与此处 WEBHOOK_SECRET 一致的字符串>
+# 必须与 Strapi webhook 的 X-Strapi-Signature header 一致，也是 .env.production 里的 WEBHOOK_SECRET
 Environment=WEBHOOK_SECRET=changeme
 ExecStart=/usr/local/bin/rebuild-on-webhook.sh
 Restart=always

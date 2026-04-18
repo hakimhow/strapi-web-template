@@ -5,7 +5,7 @@ COMPOSE := docker compose --env-file .env.$(ENV) \
            -f infra/docker/compose.base.yml \
            -f infra/docker/compose.$(ENV).yml
 
-.PHONY: dev up down logs ps build push shell-web shell-cms db-shell clean init deploy-staging deploy-prod dns-on dns-off
+.PHONY: dev up down logs ps build web-build shell-cms db-shell clean init deploy-staging deploy-prod deploy-cms-first tunnel-setup
 
 init:         ## 交互式初始化新站
 	@bash scripts/init-site.sh
@@ -45,17 +45,17 @@ db-shell:
 clean:        ## 清理本地卷（危险！）
 	@$(COMPOSE) down -v
 
-deploy-staging:
+deploy-staging:      ## 部署到本地服务器
 	@bash scripts/deploy.sh staging
 
-deploy-prod:
+deploy-prod:         ## 部署到生产 VPS（需 VPN）
 	@bash scripts/deploy.sh production
 
-dns-on:       ## 开启 CF proxy（生产态）
-	@bash infra/cloudflare/toggle-proxy.sh on .env.production
+deploy-cms-first:    ## 首次部署：仅起 CMS/cloudflared，不构建前端
+	@bash scripts/deploy.sh production --cms-first
 
-dns-off:      ## 关闭 CF proxy（调试用）
-	@bash infra/cloudflare/toggle-proxy.sh off .env.production
+tunnel-setup:        ## 用 CLI 创建 CF Tunnel（需本机 cloudflared login）
+	@bash infra/cloudflare/setup-tunnel.sh .env.production
 
 help:
 	@awk 'BEGIN {FS=":.*##"} /^[a-zA-Z_-]+:.*##/ {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)

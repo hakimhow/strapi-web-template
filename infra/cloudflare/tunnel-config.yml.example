@@ -1,0 +1,37 @@
+# Cloudflare Tunnel 配置（模式 B，使用 credentials.json + config.yml）
+# 模式 A（仅 token）在 compose.prod.yml 里默认启用，更简单；本文件用于需要版本化路由规则的场景。
+#
+# 如果你选模式 B：
+#   1. 本地装 cloudflared：
+#      winget install Cloudflare.cloudflared  # 或 brew install cloudflared
+#   2. 登录并创建 tunnel：
+#      cloudflared tunnel login
+#      cloudflared tunnel create <site-slug>
+#      → 生成 ~/.cloudflared/<tunnel-uuid>.json
+#   3. 把凭证拷到项目：
+#      cp ~/.cloudflared/<uuid>.json infra/cloudflare/tunnel-credentials.json
+#   4. 用下面模板生成 tunnel-config.yml（init-site.sh 会自动做）
+#   5. 改 compose.prod.yml 切换到模式 B
+
+tunnel: <TUNNEL_UUID>
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  # 主站 → nginx
+  - hostname: ${SITE_DOMAIN}
+    service: http://nginx:80
+  - hostname: www.${SITE_DOMAIN}
+    service: http://nginx:80
+
+  # Strapi 后台
+  - hostname: ${CMS_SUBDOMAIN}.${SITE_DOMAIN}
+    service: http://nginx:80
+    originRequest:
+      httpHostHeader: ${CMS_SUBDOMAIN}.${SITE_DOMAIN}
+
+  # CDN（imagor）
+  - hostname: cdn.${SITE_DOMAIN}
+    service: http://nginx:80
+
+  # 兜底 —— 未匹配的 hostname 返回 404
+  - service: http_status:404

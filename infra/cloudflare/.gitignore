@@ -1,2 +1,3 @@
-cf-credentials.ini
+tunnel-credentials.json
+tunnel-config.yml
 .cf-token

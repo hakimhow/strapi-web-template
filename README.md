@@ -1,22 +1,39 @@
 # Astro + Strapi Site Template —— SSG 分支
 
-> 当前分支：**`ssg`** —— 纯静态生成，nginx 直出 `dist/`。
+> 当前分支：**`ssg`** —— 纯静态生成，nginx 直出 `dist/`，Cloudflare Tunnel 暴露。
 > SSR 版本在 `main` 分支：`git checkout main`。
 
 ## 两套方案怎么选
 
-| 需求                                  | 建议分支 |
-| ---                                   | ---      |
-| 内容低频更新（每天 < 几十次）、以展示为主 | **ssg**  |
-| 要求发布即可见、有用户登录/高频交互数据   | `main`   |
-| 绝大多数企业官网、产品站、博客、案例展示   | **ssg**  |
-| 电商/订单/实时库存                     | `main`   |
+| 需求                                     | 建议分支 |
+| ---                                      | ---      |
+| 官网 / 产品站 / 博客 / 案例展示           | **ssg**  |
+| 内容低频更新（每天 < 几十次）、以展示为主  | **ssg**  |
+| 发布即可见、高频交互数据 / 草稿预览       | `main`   |
+| 电商 / 订单 / 实时库存                    | `main`   |
 
-**本分支（ssg）核心差异**：
-- 前端输出纯静态，**运行时没有 Node 进程**
-- 动态搜索走 nginx `/api/*` 反代 Strapi（浏览器端 JS fetch，无服务端参与）
-- 内容更新通过 Strapi webhook 触发重建（`scripts/rebuild-on-webhook.sh`）
-- 部署产物是一个 `dist/` 目录（rsync），不是镜像 pull
+## 生产架构（无公网 IP VPS + Cloudflare Tunnel）
+
+```
+用户浏览器
+    ↓
+Cloudflare Edge（TLS 终结 + CDN + WAF）
+    ↓  加密出站隧道
+cloudflared 容器（在 VPS 内）
+    ↓
+nginx（HTTP only，80 端口不对外暴露）
+    ↓
+├── /            → dist/ 静态文件
+├── /api/        → Strapi（限流 10 r/s）
+└── cms./cdn.*   → Strapi / Imagor
+
+管理面：你 → VPN → VPS（SSH 或 Portainer UI）
+```
+
+**为什么用 Tunnel 而不是 certbot + nginx TLS**：
+- VPS 没公网 IP，Let's Encrypt 发不了证书
+- Tunnel 不需要开防火墙端口、不需要 DNS A 记录
+- CF 自动签发 SNI 证书，自动 CDN
 
 ## 技术栈
 
@@ -26,41 +43,77 @@
 | CMS      | Strapi v4                         |
 | 数据库   | PostgreSQL 16                     |
 | 图片处理 | Imagor                            |
-| 反向代理 | nginx（+ certbot DNS-01）         |
-| DNS/CDN  | Cloudflare                        |
+| 反向代理 | nginx（HTTP only，仅容器内网）    |
+| 公网暴露 | Cloudflare Tunnel (`cloudflared`) |
 | 镜像仓库 | GHCR（仅 cms 镜像）               |
-| 编排     | Docker Compose                    |
+| 编排     | Docker Compose / Portainer        |
+| 日常管理 | VPN + SSH / Portainer Web UI      |
 
-## 快速开始
+## 快速开始 —— 建一个新站
 
 ```bash
-# 选 SSG 分支
+# 1. 基于模板创建（GitHub Use this template），clone 后切分支
 git clone git@github.com:you/new-site.git && cd new-site
 git checkout ssg
 
-./scripts/init-site.sh           # 交互式初始化
-make dev                         # 本地开发：Astro dev server + Strapi + PG + Imagor
+# 2. 交互式初始化：会问域名、CF Tunnel token、VPN 内 VPS 地址、SSH key 等
+./scripts/init-site.sh
 
-# 发布
-./scripts/deploy.sh staging      # 本地服务器预览
-./scripts/deploy.sh production   # 远程 VPS
+# 3. 本地开发
+make dev
+# → http://localhost:3000（Astro 热重载）
+# → http://localhost:1337/admin（Strapi 后台）
+
+# 4. 首次生产部署（两阶段）—— 必须 VPN 已连接
+./scripts/deploy.sh production --cms-first
+#   只起 postgres + cms + imagor + cloudflared
+#   CF Tunnel 就绪后，https://cms.example.com/admin 可访问
+
+# 在 Strapi admin：创建管理员 → 建只读 API token → 发布示例文章
+# 把 token 填入 .env.production 的 STRAPI_PUBLIC_TOKEN
+
+# 5. 完整部署
+./scripts/deploy.sh production
+#   本地 build 前端 → rsync dist/ → nginx 立即生效
 ```
 
-## 重要：内容发布流程（SSG 特有）
+## Cloudflare Tunnel 初始化（两种方式）
 
-客户在 Strapi 后台**发布新文章**后：
+**方式 A（推荐，最简单）—— Dashboard 手动**
 
-1. Strapi 触发 webhook → `https://<site>/hooks/rebuild`
-2. 远程服务器上的 `rebuild-on-webhook.sh` 接到请求
-3. 在临时容器里 `npm run build`（拉最新 Strapi 数据）
-4. 原子替换 `dist/` → nginx 立即看到新内容（~30s–2min）
+1. 打开 [Zero Trust → Networks → Tunnels](https://one.dash.cloudflare.com/)
+2. Create a tunnel → Cloudflared → 命名为 `<site-slug>`
+3. 复制 token（`eyJ...` 开头的一长串），运行 `init-site.sh` 时粘贴
+4. 在 tunnel 的 **Public Hostnames** 里添加：
 
-**第一次部署后必须做的配置**：
-1. Strapi admin → Settings → Webhooks → Create new webhook
+   | Subdomain | Domain      | Service            |
+   | ---       | ---         | ---                |
+   | (空)      | example.com | `http://nginx:80`  |
+   | www       | example.com | `http://nginx:80`  |
+   | cms       | example.com | `http://nginx:80`  |
+   | cdn       | example.com | `http://nginx:80`  |
+
+**方式 B —— CLI 自动化（要本机装 cloudflared 且已 login）**
+
+```bash
+./infra/cloudflare/setup-tunnel.sh .env.production
+```
+
+## 内容发布流程（SSG 特有）
+
+客户在 Strapi 后台发布新文章后：
+
+1. Strapi webhook → `https://<site>/hooks/rebuild`
+2. 远程服务器 `rebuild-on-webhook.sh` 接收
+3. 在临时容器里 `npm run build`（拉最新数据）
+4. 原子替换 `dist/`，nginx 立即看到新内容（~30s–2min）
+
+**部署后必做**：
+1. Strapi admin → Settings → Webhooks → Create
    - URL: `https://<site>/hooks/rebuild`
    - Events: `entry.publish` / `entry.update` / `entry.unpublish`
-   - Header: `X-Strapi-Signature: <与 systemd service 里的 WEBHOOK_SECRET 一致>`
-2. 在远程服务器安装 rebuild 服务：
+   - Header: `X-Strapi-Signature: <WEBHOOK_SECRET>`
+2. 在 VPS 上（通过 VPN SSH 或 Portainer Terminal）：
    ```bash
    sudo cp scripts/rebuild-on-webhook.sh /usr/local/bin/
    sudo cp scripts/rebuild-on-webhook.service /etc/systemd/system/
@@ -70,31 +123,49 @@ make dev                         # 本地开发：Astro dev server + Strapi + PG
 ## 目录说明
 
 ```
-apps/web      Astro SSG（output: static）
-apps/cms      Strapi v4
-infra/docker  compose 文件（base 里没有 web 服务）
-infra/nginx   conf.d 里 root /srv/www，/api/ 代理 Strapi
+apps/web                      Astro SSG（output: static）
+apps/cms                      Strapi v4
+infra/docker/
+  compose.base.yml              postgres + cms + imagor（共享）
+  compose.dev.yml               本地开发叠加
+  compose.staging.yml           本地服务器（nginx + 自签证书）
+  compose.prod.yml              生产（nginx + cloudflared）
+infra/nginx/conf.d/
+  staging.conf                  HTTPS 自签（局域网访问）
+  prod.conf                     HTTP only（CF 终结 TLS）
+infra/cloudflare/
+  setup-tunnel.sh               一键创建 tunnel + 绑 DNS
+  tunnel-config.yml.example     模式 B 配置模板
 scripts/
-  init-site.sh              交互式初始化
-  deploy.sh                 本地 build → rsync dist/ → compose up
-  rebuild-on-webhook.sh     接收 Strapi webhook → 原子重建
-  sync-db.sh                本地 ↔ 远程数据库同步
+  init-site.sh                  交互式初始化
+  deploy.sh                     两阶段部署（含 --cms-first）
+  rebuild-on-webhook.sh         Strapi 发布触发重建
+  sync-db.sh                    本地 ↔ 远程 DB 同步
 ```
 
 ## 常用命令
 
 ```bash
-make dev          # 本地开发（Astro dev 热重载 + Strapi）
-make logs         # 跟踪日志
+make dev            # 本地开发
+make logs           # 跟踪日志
+make build          # 本地构建前端 + cms 镜像
 make deploy-staging
 make deploy-prod
-make dns-off      # 调试时关闭 CF proxy，直连源站
-make dns-on       # 恢复 CF proxy
 ```
 
-## 几个提醒
+## Portainer 集成
 
-- **搜索限流**：`prod.conf` 已配 10 r/s per IP。如果客户站有爬虫嫌疑，把 `/api/` location 改成需要 token（`proxy_set_header Authorization`）或直接关掉。
-- **草稿预览**：SSG 不支持。如果客户需要预览未发布内容，切回 `main`（SSR）或单独跑一个 Node 预览服务。
-- **文章数量上限**：`getStaticPaths` 一次拉 1000 条。如果预期超过，改分页或上 `@astrojs/db` 的增量构建。
-- **首次部署顺序**：第一次发布时 Strapi 还没起，`npm run build` 会拉不到数据。解决办法：先跑一次让 cms 起来（可手动 `docker compose up -d cms postgres`），再运行完整 `deploy.sh`。
+部署后可把 VPS 上的 compose 纳入 Portainer 管理：
+
+1. Portainer → Stacks → Add stack → **Repository** 或 **Upload**
+2. Compose path：`infra/docker/compose.base.yml` + `infra/docker/compose.prod.yml`
+3. Environment variables：上传 `.env.production`
+
+之后容器重启、查看日志、回滚等都能在 Portainer UI 做，不必每次都 SSH。
+
+## 已知限制与提示
+
+- **草稿预览**：SSG 不支持。客户要预览未发布内容就切回 `main`
+- **getStaticPaths 上限**：当前一次拉 1000 条文章，超过需改分页策略
+- **健康检查走公共域名**：deploy.sh 末尾 curl 的是 `https://example.com`，如果 CF Tunnel 未就绪会失败 —— 首次等 1–2 分钟
+- **回滚**：`ssh <host> "cd /srv/<site> && mv dist.old.<ts> dist"`（保留最近 2 份）
