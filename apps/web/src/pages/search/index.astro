@@ -2,14 +2,14 @@
 import Base from '@/layouts/Base.astro';
 const q = Astro.url.searchParams.get('q') ?? '';
 ---
-<Base title={q ? `搜索：${q}` : '搜索'}>
-  <h1>搜索</h1>
+<Base title={q ? `Search: ${q}` : 'Search'}>
+  <h1>Search</h1>
   <form method="get" action="/search">
-    <input type="search" name="q" value={q} placeholder="输入关键词..." autofocus />
-    <button type="submit">搜索</button>
+    <input type="search" name="q" value={q} placeholder="Enter keywords..." autofocus />
+    <button type="submit">Search</button>
   </form>
   <div id="results">
-    {q && <p>正在搜索 <strong>{q}</strong> ...</p>}
+    {q && <p>Searching for <strong>{q}</strong> ...</p>}
   </div>
   <script define:vars={{ q }}>
     if (q) {
@@ -17,7 +17,7 @@ const q = Astro.url.searchParams.get('q') ?? '';
         .then((r) => r.json())
         .then((data) => {
           const el = document.getElementById('results');
-          if (!data.results?.length) { el.innerHTML = '<p>无结果</p>'; return; }
+          if (!data.results?.length) { el.innerHTML = '<p>No results</p>'; return; }
           el.innerHTML = '<ul>' + data.results.map(
             (r) => `<li><a href="/articles/${r.slug}">${r.title}</a><p>${r.excerpt ?? ''}</p></li>`
           ).join('') + '</ul>';
