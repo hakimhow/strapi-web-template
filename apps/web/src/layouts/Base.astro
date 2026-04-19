@@ -4,7 +4,7 @@ interface Props {
   description?: string;
 }
 const { title, description = '' } = Astro.props;
-const siteUrl = import.meta.env.PUBLIC_SITE_URL;
+const siteUrl = import.meta.env.PUBLIC_SITE_URL || 'http://localhost:3000';
 ---
 <!doctype html>
 <html lang="en">
