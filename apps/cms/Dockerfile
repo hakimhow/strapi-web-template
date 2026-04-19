@@ -1,5 +1,6 @@
+# Strapi v5.42+ —— Node 24 LTS（兼容 Astro 6）
 # --- build ---
-FROM node:22-alpine AS build
+FROM node:24-alpine AS build
 RUN apk add --no-cache build-base python3 vips-dev
 WORKDIR /opt/app
 COPY package*.json ./
@@ -8,7 +9,7 @@ COPY . .
 RUN NODE_ENV=production npm run build
 
 # --- runtime ---
-FROM node:22-alpine AS runtime
+FROM node:24-alpine AS runtime
 RUN apk add --no-cache vips
 WORKDIR /opt/app
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=1337
